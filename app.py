@@ -22,7 +22,7 @@ app = FastAPI(
 model = None
 
 # Load the model
-def load_model(model_path: str = r"D:\Uni\Graduationproject\FallDet\anti_overfitting_fall_detection_model.h5"):
+def load_model(model_path: str ="anti_overfitting_fall_detection_model.h5"):
     global model
     try:
         model = tf.keras.models.load_model(model_path)
