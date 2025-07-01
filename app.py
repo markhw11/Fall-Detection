@@ -202,7 +202,7 @@ def predict(data: FallDetectionData):
         # AND there's significant motion detected
         if (predicted_class == "falling" and 
             motion_analysis['has_significant_motion'] and
-            falling_prob > 0.6):  # Much higher threshold
+            falling_prob > 0.8):  # Much higher threshold
             
             # Additional validation for fall
             if (motion_analysis['max_acc'] > 20.0 and  # Very high acceleration
