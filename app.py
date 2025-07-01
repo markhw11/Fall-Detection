@@ -211,7 +211,7 @@ def predict(data: FallDetectionData):
         
         # ULTRA-CONSERVATIVE: Only detect fall if ALL conditions are met
         fall_detected = (
-            falling_prob > 0.9 and  # Very high ML confidence
+            falling_prob > 0.6 and  # Very high ML confidence
             motion_analysis['has_significant_motion'] and
             motion_analysis['max_acc'] > 30.0 and  # Very high acceleration
             motion_analysis['acc_range'] > 20.0 and  # Large acceleration change
