@@ -22,7 +22,7 @@ app = FastAPI(
 model = None
 
 # Load the enhanced anti-overfitting trained model
-def load_model(model_path: str = "anti_overfitting_fall_detection_model.h5"):
+def load_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
     global model
     try:
         model = tf.keras.models.load_model(model_path)
@@ -68,18 +68,112 @@ class FallDetectionRawData(BaseModel):
     def validate_features_shape(cls, v):
         if len(v) != 100:
             raise ValueError('features must contain exactly 100 time steps')
-        if any(len(timestep) != 17 for timestep in v):
-            raise ValueError('Each timestep must have exactly 17 features')
+        if any(len(timestep) != 27 for timestep in v):
+            raise ValueError('Each timestep must have exactly 27 features')
         return v
 
 # List of class labels (must match training order)
 classes = ['falling', 'kneeling', 'walking']
 
-# Removed change detection features - model now expects only 17 base features
-
-def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
+def calculate_change_features(window_data):
     """
-    Preprocess sensor data with 17 base features for the simplified model.
+    Calculate change detection features for a window of sensor data.
+    Returns 15 features to combine with 12 base features for 27 total.
+    """
+    features = []
+    
+    # Use the already computed acc_mag and gyro_mag if available
+    if 'acc_mag' in window_data.columns:
+        acc_mag = window_data['acc_mag']
+    else:
+        acc_mag = np.sqrt(window_data['ax']**2 + window_data['ay']**2 + window_data['az']**2)
+    
+    if 'gyro_mag' in window_data.columns:
+        gyro_mag = window_data['gyro_mag']
+    else:
+        gyro_mag = np.sqrt(window_data['wx']**2 + window_data['wy']**2 + window_data['wz']**2)
+    
+    # 1. Maximum acceleration magnitude
+    max_acc = acc_mag.max()
+    features.append(max_acc)
+    
+    # 2. Maximum change in acceleration magnitude
+    acc_diff = acc_mag.diff().abs().max()
+    features.append(acc_diff if not np.isnan(acc_diff) else 0)
+    
+    # 3. Standard deviation of acceleration
+    acc_std = acc_mag.std()
+    features.append(acc_std if not np.isnan(acc_std) else 0)
+    
+    # 4. Maximum rotational velocity (using gyro_mag)
+    max_gyro = gyro_mag.max()
+    features.append(max_gyro)
+    
+    # 5. Free fall indicator (minimum acceleration)
+    min_acc = acc_mag.min()
+    features.append(min_acc)
+    
+    # 6. Impact indicator
+    acc_values = acc_mag.values
+    impact_score = 0
+    for i in range(1, len(acc_values)):
+        if acc_values[i-1] < 5.0 and acc_values[i] > 12.0:
+            impact_score = max(impact_score, acc_values[i] - acc_values[i-1])
+    features.append(impact_score)
+    
+    # 7. Change rate in X, Y, Z accelerations
+    ax_change = window_data['ax'].diff().abs().max()
+    ay_change = window_data['ay'].diff().abs().max()
+    az_change = window_data['az'].diff().abs().max()
+    features.extend([
+        ax_change if not np.isnan(ax_change) else 0,
+        ay_change if not np.isnan(ay_change) else 0,
+        az_change if not np.isnan(az_change) else 0
+    ])
+    
+    # 8. Gyroscope change features
+    wx_change = window_data['wx'].diff().abs().max()
+    wy_change = window_data['wy'].diff().abs().max()
+    wz_change = window_data['wz'].diff().abs().max()
+    features.extend([
+        wx_change if not np.isnan(wx_change) else 0,
+        wy_change if not np.isnan(wy_change) else 0,
+        wz_change if not np.isnan(wz_change) else 0
+    ])
+    
+    # 9. Statistical features from rolling windows
+    if 'acc_mag_std_50' in window_data.columns:
+        acc_std_50_max = window_data['acc_mag_std_50'].max()
+        gyro_std_50_max = window_data['gyro_mag_std_50'].max()
+        features.extend([
+            acc_std_50_max if not np.isnan(acc_std_50_max) else 0,
+            gyro_std_50_max if not np.isnan(gyro_std_50_max) else 0
+        ])
+    else:
+        features.extend([0, 0])  # Placeholder if rolling features not available
+    
+    # 10. Fall pattern score (kept for feature consistency but not used in decision)
+    fall_score = 0
+    if max_acc > 15.0:
+        fall_score += 0.3
+    if min_acc < 3.0:
+        fall_score += 0.25
+    if acc_diff > 8.0:
+        fall_score += 0.25
+    if max_gyro > 3.0:
+        fall_score += 0.2
+    if len(features) >= 12 and features[12] > 2.0:
+        fall_score += 0.1
+    if len(features) >= 13 and features[13] > 1.0:
+        fall_score += 0.1
+    
+    features.append(fall_score)
+    
+    return np.array(features).reshape(1, -1)
+
+def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
+    """
+    Preprocess sensor data with enhanced features matching the training pipeline.
     """
     try:
         # Convert to DataFrame
@@ -102,26 +196,26 @@ def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
         df['acc_mag_mean_50'] = df['acc_mag'].rolling(window=50, min_periods=1).mean().fillna(0)
         df['gyro_mag_mean_50'] = df['gyro_mag'].rolling(window=50, min_periods=1).mean().fillna(0)
         
-        # Additional engineered features for 17 total
-        df['acc_x_mag'] = df['ax'].abs()
-        df['acc_y_mag'] = df['ay'].abs()
-        df['acc_z_mag'] = df['az'].abs()
-        df['gyro_x_mag'] = df['wx'].abs()
-        df['gyro_y_mag'] = df['wy'].abs()
-        
-        # 17 features total (must match model training)
+        # Base features (must match training feature_columns)
         feature_columns = [
-            'ax', 'ay', 'az', 'wx', 'wy', 'wz',           # 6 raw features
-            'acc_mag', 'gyro_mag',                          # 2 magnitude features  
-            'acc_mag_std_50', 'gyro_mag_std_50',           # 2 rolling std features
-            'acc_mag_mean_50', 'gyro_mag_mean_50',         # 2 rolling mean features
-            'acc_x_mag', 'acc_y_mag', 'acc_z_mag',         # 3 absolute acceleration features
-            'gyro_x_mag', 'gyro_y_mag'                     # 2 absolute gyro features
+            'ax', 'ay', 'az', 'wx', 'wy', 'wz',
+            'acc_mag', 'gyro_mag',
+            'acc_mag_std_50', 'gyro_mag_std_50',
+            'acc_mag_mean_50', 'gyro_mag_mean_50'
         ]
         
-        features = df[feature_columns].values
+        base_features = df[feature_columns].values
         
-        return features
+        # Calculate change detection features
+        change_features = calculate_change_features(df)
+        
+        # Create enhanced features (base + change features repeated for each timestep)
+        enhanced_features = np.concatenate([
+            base_features, 
+            np.tile(change_features, (len(df), 1))
+        ], axis=1)
+        
+        return enhanced_features
         
     except Exception as e:
         logger.error(f"Error in preprocessing: {e}")
@@ -136,11 +230,11 @@ def predict(data: FallDetectionData):
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     try:
-        # Preprocess with base features only
-        features = preprocess_sensor_data(data.sensor_data)
+        # Preprocess with enhanced features
+        features = preprocess_enhanced_sensor_data(data.sensor_data)
         
-        # Validate feature shape - model expects 17 features
-        expected_features = 17
+        # Validate feature shape - model expects 27 features (12 base + 15 change)
+        expected_features = 27
         if features.shape[1] != expected_features:
             raise HTTPException(
                 status_code=400, 
@@ -177,7 +271,7 @@ def predict(data: FallDetectionData):
             "model_info": {
                 "model_type": "Pure ML Fall Detection",
                 "features_used": expected_features,
-                "feature_breakdown": "17 engineered features",
+                "feature_breakdown": "12 base + 15 change detection = 27 total",
                 "decision_approach": "Pure machine learning - no rule-based overrides"
             },
             "status": "success"
@@ -193,7 +287,7 @@ def predict(data: FallDetectionData):
 def predict_raw(data: FallDetectionRawData):
     """
     Alternative endpoint for already preprocessed data.
-    Expects 100 time steps with 17 features each.
+    Expects 100 time steps with 27 features each.
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -202,8 +296,8 @@ def predict_raw(data: FallDetectionRawData):
         # Convert the input list into a numpy array
         features = np.array(data.features)
         
-        # Validate input shape (100 time steps, 17 features)
-        expected_features = 17
+        # Validate input shape (100 time steps, 27 features)
+        expected_features = 27
         if features.shape != (100, expected_features):
             raise HTTPException(
                 status_code=400,
@@ -252,22 +346,22 @@ def read_root():
         "model_info": {
             "type": "Pure Machine Learning Fall Detection",
             "approach": "Relies solely on trained model predictions", 
-            "features_per_timestep": 17,
-            "feature_breakdown": "17 engineered features"
+            "features_per_timestep": 27,
+            "feature_breakdown": "12 base + 15 change detection = 27 total"
         },
         "features": [
             "✓ Pure machine learning approach",
             "✓ Bidirectional GRU neural network",
-            "✓ 17 engineered features",
+            "✓ Enhanced feature preprocessing",
             "✓ Rolling window statistical features",
-            "✓ Magnitude and absolute value features",
+            "✓ Change detection features for context",
             "✓ No rule-based overrides",
             "✓ Clean ML-based decision making"
         ],
         "classes": classes,
         "endpoints": {
             "/predict/": "Send 100 sensor readings with automatic feature enhancement",
-            "/predict_raw/": "Send preprocessed data (17 features per timestep)",
+            "/predict_raw/": "Send preprocessed data (27 features per timestep)",
             "/health": "Check API and model status",
             "/model_info": "Get detailed model information",
             "/reload_model": "Reload the model (POST endpoint)"
@@ -307,11 +401,17 @@ def model_info():
                     "ax", "ay", "az", "wx", "wy", "wz",
                     "acc_mag", "gyro_mag",
                     "acc_mag_std_50", "gyro_mag_std_50",
-                    "acc_mag_mean_50", "gyro_mag_mean_50",
-                    "acc_x_mag", "acc_y_mag", "acc_z_mag",
-                    "gyro_x_mag", "gyro_y_mag"
+                    "acc_mag_mean_50", "gyro_mag_mean_50"
                 ],
-                "total_features_per_timestep": 17
+                "change_detection_features": [
+                    "max_acceleration", "max_change_rate", "acceleration_std",
+                    "max_gyro_velocity", "min_acceleration", "impact_score",
+                    "ax_change", "ay_change", "az_change",
+                    "wx_change", "wy_change", "wz_change",
+                    "acc_std_50_max", "gyro_std_50_max",
+                    "fall_pattern_score"
+                ],
+                "total_features_per_timestep": 27
             },
             "model_approach": {
                 "decision_method": "Pure machine learning",
@@ -320,9 +420,8 @@ def model_info():
                 "confidence_source": "Direct from neural network output"
             },
             "preprocessing": {
-                "feature_engineering": "✓ 17 engineered features with rolling statistics",
-                "magnitude_features": "✓ Acceleration and gyroscope magnitudes",
-                "absolute_features": "✓ Absolute values for directional components",
+                "feature_engineering": "✓ Enhanced features with rolling statistics",
+                "change_detection": "✓ 15 change detection features (for context only)",
                 "normalization": "✓ Handled during training"
             }
         }
