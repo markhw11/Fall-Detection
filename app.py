@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Enhanced Anti-Overfitting Fall Detection API", 
-    description="API for fall detection with change detection and anti-overfitting",
-    version="2.0.0"
+    title="Fall Detection API - Pure ML Predictions", 
+    description="API for fall detection relying solely on machine learning model predictions",
+    version="2.1.0"
 )
 
 # Global model variable
@@ -26,7 +26,7 @@ def load_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model
     global model
     try:
         model = tf.keras.models.load_model(model_path)
-        logger.info(f"Enhanced anti-overfitting model loaded successfully from {model_path}")
+        logger.info(f"Model loaded successfully from {model_path}")
         return True
     except Exception as e:
         logger.error(f"Error loading model: {e}")
@@ -68,8 +68,8 @@ class FallDetectionRawData(BaseModel):
     def validate_features_shape(cls, v):
         if len(v) != 100:
             raise ValueError('features must contain exactly 100 time steps')
-        if any(len(timestep) != 17 for timestep in v):  # Updated for correct features
-            raise ValueError('Each timestep must have exactly 17 features')
+        if any(len(timestep) != 27 for timestep in v):
+            raise ValueError('Each timestep must have exactly 27 features')
         return v
 
 # List of class labels (must match training order)
@@ -77,8 +77,8 @@ classes = ['falling', 'kneeling', 'walking']
 
 def calculate_change_features(window_data):
     """
-    Calculate drastic change indicators for a window of sensor data.
-    FIXED to match training exactly - produces 15 features for 27 total!
+    Calculate change detection features for a window of sensor data.
+    Returns 15 features to combine with 12 base features for 27 total.
     """
     features = []
     
@@ -92,8 +92,6 @@ def calculate_change_features(window_data):
         gyro_mag = window_data['gyro_mag']
     else:
         gyro_mag = np.sqrt(window_data['wx']**2 + window_data['wy']**2 + window_data['wz']**2)
-    
-    # Model expects 27 total features = 12 base + 15 change features
     
     # 1. Maximum acceleration magnitude
     max_acc = acc_mag.max()
@@ -143,7 +141,7 @@ def calculate_change_features(window_data):
         wz_change if not np.isnan(wz_change) else 0
     ])
     
-    # 9. Statistical features from rolling windows (if available)
+    # 9. Statistical features from rolling windows
     if 'acc_mag_std_50' in window_data.columns:
         acc_std_50_max = window_data['acc_mag_std_50'].max()
         gyro_std_50_max = window_data['gyro_mag_std_50'].max()
@@ -154,7 +152,7 @@ def calculate_change_features(window_data):
     else:
         features.extend([0, 0])  # Placeholder if rolling features not available
     
-    # 10. Enhanced fall pattern score
+    # 10. Fall pattern score (kept for feature consistency but not used in decision)
     fall_score = 0
     if max_acc > 15.0:
         fall_score += 0.3
@@ -164,17 +162,16 @@ def calculate_change_features(window_data):
         fall_score += 0.25
     if max_gyro > 3.0:
         fall_score += 0.2
-    # Add statistical indicators
-    if len(features) >= 14 and features[12] > 2.0:  # High acc std
+    if len(features) >= 12 and features[12] > 2.0:
         fall_score += 0.1
-    if len(features) >= 14 and features[13] > 1.0:  # High gyro std
+    if len(features) >= 13 and features[13] > 1.0:
         fall_score += 0.1
     
     features.append(fall_score)
     
     return np.array(features).reshape(1, -1)
 
-def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tuple:
+def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
     """
     Preprocess sensor data with enhanced features matching the training pipeline.
     """
@@ -218,7 +215,7 @@ def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tup
             np.tile(change_features, (len(df), 1))
         ], axis=1)
         
-        return enhanced_features, change_features
+        return enhanced_features
         
     except Exception as e:
         logger.error(f"Error in preprocessing: {e}")
@@ -227,14 +224,14 @@ def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tup
 @app.post("/predict/")
 def predict(data: FallDetectionData):
     """
-    Enhanced fall detection with anti-overfitting model and change pattern analysis.
+    Fall detection using pure machine learning model predictions.
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     try:
         # Preprocess with enhanced features
-        features, change_features = preprocess_enhanced_sensor_data(data.sensor_data)
+        features = preprocess_enhanced_sensor_data(data.sensor_data)
         
         # Validate feature shape - model expects 27 features (12 base + 15 change)
         expected_features = 27
@@ -255,50 +252,10 @@ def predict(data: FallDetectionData):
         kneeling_prob = float(prediction[0][1])
         walking_prob = float(prediction[0][2])
         
-        # Extract change analysis features (15 core features)
-        max_acc = float(change_features[0][0])
-        max_change = float(change_features[0][1])
-        acc_std = float(change_features[0][2])
-        max_gyro = float(change_features[0][3])
-        min_acc = float(change_features[0][4])
-        impact_score = float(change_features[0][5])
-        ax_change = float(change_features[0][6])
-        ay_change = float(change_features[0][7])
-        az_change = float(change_features[0][8])
-        wx_change = float(change_features[0][9])
-        wy_change = float(change_features[0][10])
-        wz_change = float(change_features[0][11])
-        acc_std_50_max = float(change_features[0][12])
-        gyro_std_50_max = float(change_features[0][13])
-        fall_score = float(change_features[0][14])
-        
-        # Enhanced decision logic (matching training approach)
+        # Use pure ML predictions - no rule-based overrides
         predicted_class_index = prediction.argmax(axis=1)[0]
-        ml_top_choice = classes[predicted_class_index]
-        ml_confidence = float(prediction[0][predicted_class_index])
-        
-        # Apply enhanced decision rules
-        if fall_score > 0.9 and max_acc > 30.0:  # Extreme fall pattern
-            predicted_class = "falling"
-            confidence = min(0.95, falling_prob + fall_score * 0.5)
-            decision_reason = "OVERRIDE: Extreme fall pattern detected"
-        elif max_acc > 35.0 and min_acc < 1.0:  # Massive impact + free fall
-            predicted_class = "falling"
-            confidence = min(0.90, falling_prob + 0.4)
-            decision_reason = "OVERRIDE: Massive impact + free fall"
-        elif falling_prob > 0.7:  # ML is VERY confident about fall
-            predicted_class = "falling"
-            confidence = falling_prob
-            decision_reason = "ML very confident about fall"
-        elif fall_score > 0.7 and falling_prob > 0.1:  # Strong physical + some ML evidence
-            predicted_class = "falling"
-            confidence = min(0.85, falling_prob + fall_score * 0.3)
-            decision_reason = "Strong fall pattern + ML evidence"
-        else:
-            # Trust the ML model's top choice
-            predicted_class = ml_top_choice
-            confidence = ml_confidence
-            decision_reason = f"ML classification: {ml_top_choice} (confidence: {ml_confidence:.3f})"
+        predicted_class = classes[predicted_class_index]
+        confidence = float(prediction[0][predicted_class_index])
         
         # Get prediction probabilities for all classes
         prediction_probs = {
@@ -306,49 +263,16 @@ def predict(data: FallDetectionData):
             for i in range(len(classes))
         }
         
-        # Calculate fall indicators
-        fall_indicators = {
-            "high_impact": max_acc > 15.0,
-            "free_fall": min_acc < 3.0,
-            "sudden_change": max_change > 8.0,
-            "high_rotation": max_gyro > 3.0,
-            "strong_fall_pattern": fall_score > 0.5,
-            "extreme_acceleration": max_acc > 20.0,
-            "impact_detected": impact_score > 8.0,
-            "high_statistical_variance": acc_std_50_max > 2.0 or gyro_std_50_max > 1.0
-        }
-        
         return {
             "predicted_class": predicted_class,
-            "confidence": min(confidence, 1.0),
-            "decision_reason": decision_reason,
+            "confidence": confidence,
+            "decision_reason": f"ML model prediction: {predicted_class}",
             "ml_predictions": prediction_probs,
-            "change_analysis": {
-                "max_acceleration": round(max_acc, 3),
-                "min_acceleration": round(min_acc, 3),
-                "max_change_rate": round(max_change, 3),
-                "acceleration_std": round(acc_std, 3),
-                "max_gyro_velocity": round(max_gyro, 3),
-                "impact_score": round(impact_score, 3),
-                "fall_pattern_score": round(fall_score, 3),
-                "axis_changes": {
-                    "ax_max_change": round(ax_change, 3),
-                    "ay_max_change": round(ay_change, 3),
-                    "az_max_change": round(az_change, 3),
-                    "wx_max_change": round(wx_change, 3),
-                    "wy_max_change": round(wy_change, 3),
-                    "wz_max_change": round(wz_change, 3)
-                },
-                "statistical_features": {
-                    "acc_std_50_max": round(acc_std_50_max, 3),
-                    "gyro_std_50_max": round(gyro_std_50_max, 3)
-                }
-            },
-            "fall_indicators": fall_indicators,
             "model_info": {
-                "model_type": "Anti-overfitting Enhanced GRU",
+                "model_type": "Pure ML Fall Detection",
                 "features_used": expected_features,
-                "feature_breakdown": "12 base + 15 change detection = 27 total"
+                "feature_breakdown": "12 base + 15 change detection = 27 total",
+                "decision_approach": "Pure machine learning - no rule-based overrides"
             },
             "status": "success"
         }
@@ -362,8 +286,8 @@ def predict(data: FallDetectionData):
 @app.post("/predict_raw/")
 def predict_raw(data: FallDetectionRawData):
     """
-    Alternative endpoint for already preprocessed enhanced data.
-    Expects 100 time steps with 28 features each.
+    Alternative endpoint for already preprocessed data.
+    Expects 100 time steps with 27 features each.
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -386,23 +310,10 @@ def predict_raw(data: FallDetectionRawData):
         # Get model prediction
         prediction = model.predict(features, verbose=0)
         
-        # Extract probabilities
-        falling_prob = float(prediction[0][0])
-        kneeling_prob = float(prediction[0][1])
-        walking_prob = float(prediction[0][2])
-        
-        # Apply simplified decision logic for raw data
+        # Use pure ML predictions
         predicted_class_index = prediction.argmax(axis=1)[0]
         predicted_class = classes[predicted_class_index]
         confidence = float(prediction[0][predicted_class_index])
-        
-        # Enhanced logic for raw data (less detailed than full preprocessing)
-        if falling_prob > 0.15:
-            predicted_class = "falling"
-            confidence = falling_prob
-            decision_reason = "ML fall detection (raw data mode)"
-        else:
-            decision_reason = f"ML classification: {predicted_class} (raw data mode)"
         
         prediction_probs = {
             classes[i]: float(prediction[0][i]) 
@@ -411,10 +322,13 @@ def predict_raw(data: FallDetectionRawData):
         
         return {
             "predicted_class": predicted_class,
-            "confidence": min(confidence, 1.0),
-            "decision_reason": decision_reason,
+            "confidence": confidence,
+            "decision_reason": f"ML model prediction: {predicted_class} (raw data mode)",
             "ml_predictions": prediction_probs,
-            "note": "Raw data mode - detailed change analysis not available",
+            "model_info": {
+                "model_type": "Pure ML Fall Detection",
+                "decision_approach": "Pure machine learning - no rule-based overrides"
+            },
             "status": "success"
         }
         
@@ -427,25 +341,22 @@ def predict_raw(data: FallDetectionRawData):
 @app.get("/")
 def read_root():
     return {
-        "message": "Welcome to the Enhanced Anti-Overfitting Fall Detection API!",
+        "message": "Welcome to the Pure ML Fall Detection API!",
         "model_loaded": model is not None,
         "model_info": {
-            "type": "Anti-overfitting Enhanced GRU with Change Detection",
-            "training_approach": "Realistic accuracy with anti-overfitting measures", 
+            "type": "Pure Machine Learning Fall Detection",
+            "approach": "Relies solely on trained model predictions", 
             "features_per_timestep": 27,
             "feature_breakdown": "12 base + 15 change detection = 27 total"
         },
         "features": [
-            "✓ Anti-overfitting training with realistic accuracy",
-            "✓ ML-based classification with Bidirectional GRU",
-            "✓ Enhanced change detection (acceleration & gyroscope)",
+            "✓ Pure machine learning approach",
+            "✓ Bidirectional GRU neural network",
+            "✓ Enhanced feature preprocessing",
             "✓ Rolling window statistical features",
-            "✓ Free fall pattern recognition",
-            "✓ Impact detection with improved sensitivity",
-            "✓ Multi-axis rotation analysis",
-            "✓ Combined rule-based enhancement",
-            "✓ Detailed change analysis with 16 features",
-            "✓ Decision reasoning explanation"
+            "✓ Change detection features for context",
+            "✓ No rule-based overrides",
+            "✓ Clean ML-based decision making"
         ],
         "classes": classes,
         "endpoints": {
@@ -462,8 +373,8 @@ def health_check():
     return {
         "status": "healthy" if model is not None else "unhealthy",
         "model_loaded": model is not None,
-        "model_type": "Enhanced Anti-Overfitting Fall Detection",
-        "expected_performance": "Improved real-world accuracy with anti-overfitting training"
+        "model_type": "Pure ML Fall Detection",
+        "approach": "Machine learning predictions only"
     }
 
 @app.post("/reload_model")
@@ -498,24 +409,20 @@ def model_info():
                     "ax_change", "ay_change", "az_change",
                     "wx_change", "wy_change", "wz_change",
                     "acc_std_50_max", "gyro_std_50_max",
-                    "enhanced_fall_pattern_score"
+                    "fall_pattern_score"
                 ],
                 "total_features_per_timestep": 27
             },
-            "model_improvements": {
-                "anti_overfitting": "✓ Aggressive regularization and early stopping",
-                "realistic_accuracy": "✓ Trained for generalization, not memorization",
-                "enhanced_features": "✓ 28 features including rolling statistics",
-                "change_detection": "✓ 16 change detection features",
-                "combined_approach": "✓ ML + enhanced rule-based decisions"
+            "model_approach": {
+                "decision_method": "Pure machine learning",
+                "rule_based_overrides": "None - removed",
+                "fall_indicators": "Not used in decision making",
+                "confidence_source": "Direct from neural network output"
             },
-            "fall_detection_thresholds": {
-                "high_impact": "> 15 m/s²",
-                "free_fall": "< 3 m/s²",
-                "sudden_change": "> 8 m/s²",
-                "high_rotation": "> 3 rad/s",
-                "strong_fall_pattern": "> 0.5 score",
-                "extreme_conditions": "> 0.9 fall score + > 30 m/s²"
+            "preprocessing": {
+                "feature_engineering": "✓ Enhanced features with rolling statistics",
+                "change_detection": "✓ 15 change detection features (for context only)",
+                "normalization": "✓ Handled during training"
             }
         }
     except Exception as e:
@@ -523,13 +430,11 @@ def model_info():
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    print("Starting Enhanced Anti-Overfitting Fall Detection API...")
+    print("Starting Pure ML Fall Detection API...")
     print("Model features:")
-    print("- ✓ Anti-overfitting training with realistic accuracy")
-    print("- ✓ Enhanced change detection (16 features)")
-    print("- ✓ Rolling window statistics")
-    print("- ✓ Physics-based fall pattern recognition")
-    print("- ✓ Combined ML + rule-based decisions")
-    print("- ✓ Comprehensive analysis and reasoning")
-    print("- ✓ Improved error handling and validation")
+    print("- ✓ Pure machine learning approach")
+    print("- ✓ No rule-based overrides or fall indicators")
+    print("- ✓ Enhanced feature preprocessing")
+    print("- ✓ Direct neural network predictions")
+    print("- ✓ Clean decision making process")
     uvicorn.run(app, host="0.0.0.0", port=8000)
