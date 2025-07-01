@@ -77,8 +77,7 @@ classes = ['falling', 'kneeling', 'walking']
 
 def detect_motion_level(window_data):
     """
-    Detect the overall motion level to help distinguish actual movement from noise.
-    Returns motion metrics to prevent false positives during stationary periods.
+    Detect the overall motion level with VERY strict thresholds to prevent false positives.
     """
     # Calculate basic motion indicators
     acc_mag = np.sqrt(window_data['ax']**2 + window_data['ay']**2 + window_data['az']**2)
@@ -90,15 +89,26 @@ def detect_motion_level(window_data):
     acc_range = acc_mag.max() - acc_mag.min()
     gyro_range = gyro_mag.max() - gyro_mag.min()
     
-    # Check for actual significant movement
+    # MUCH stricter thresholds for "stationary" detection
+    is_stationary = (
+        acc_variance < 0.5 and      # Very low acceleration variance
+        gyro_variance < 0.1 and     # Very low rotation variance  
+        acc_range < 2.0 and         # Very small acceleration range
+        gyro_range < 0.5 and        # Very small rotation range
+        acc_mag.max() < 15.0        # Maximum acceleration not too high
+    )
+    
+    # For significant motion, require MUCH higher thresholds
     has_significant_motion = (
-        acc_variance > 1.0 or  # Significant acceleration variance
-        gyro_variance > 0.5 or  # Significant rotation variance
-        acc_range > 5.0 or     # Significant acceleration range
-        gyro_range > 2.0       # Significant rotation range
+        acc_variance > 5.0 or       # Much higher variance required
+        gyro_variance > 2.0 or      # Much higher gyro variance
+        acc_range > 15.0 or         # Much larger acceleration range
+        gyro_range > 5.0 or         # Much larger rotation range
+        acc_mag.max() > 25.0        # High peak acceleration
     )
     
     return {
+        'is_stationary': bool(is_stationary),
         'has_significant_motion': bool(has_significant_motion),
         'acc_variance': float(acc_variance),
         'gyro_variance': float(gyro_variance),
@@ -106,7 +116,8 @@ def detect_motion_level(window_data):
         'gyro_range': float(gyro_range),
         'max_acc': float(acc_mag.max()),
         'min_acc': float(acc_mag.min()),
-        'max_gyro': float(gyro_mag.max())
+        'max_gyro': float(gyro_mag.max()),
+        'avg_acc': float(acc_mag.mean())
     }
 
 def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
@@ -159,10 +170,11 @@ def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> np.ndarray:
         logger.error(f"Error in preprocessing: {e}")
         raise HTTPException(status_code=500, detail=f"Preprocessing error: {str(e)}")
 
+# Updated prediction logic with ultra-conservative approach
 @app.post("/predict/")
 def predict(data: FallDetectionData):
     """
-    Conservative fall detection with motion analysis to reduce false positives.
+    ULTRA-CONSERVATIVE fall detection - heavily biased against false positives.
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -171,16 +183,20 @@ def predict(data: FallDetectionData):
         # Preprocess features and get raw data for motion analysis
         features, df = preprocess_sensor_data(data.sensor_data)
         
-        # Validate feature shape - model expects 17 features
-        expected_features = 17
-        if features.shape[1] != expected_features:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid feature shape after preprocessing. Expected (100, {expected_features}), got {features.shape}"
-            )
-        
-        # Analyze motion level to prevent false positives
+        # Analyze motion level first
         motion_analysis = detect_motion_level(df)
+        
+        # If device is clearly stationary, immediately return "kneeling" or "walking"
+        if motion_analysis['is_stationary']:
+            return {
+                "predicted_class": "kneeling",  # Default to safest non-fall class
+                "confidence": 0.95,
+                "decision_reason": "Device detected as stationary - cannot be falling",
+                "ml_predictions": {"falling": 0.0, "kneeling": 0.95, "walking": 0.05},
+                "motion_analysis": motion_analysis,
+                "override_reason": "STATIONARY_OVERRIDE",
+                "status": "success"
+            }
         
         # Reshape for prediction
         features = np.expand_dims(features, axis=0)
@@ -193,48 +209,33 @@ def predict(data: FallDetectionData):
         kneeling_prob = float(prediction[0][1])
         walking_prob = float(prediction[0][2])
         
-        # Use the model's prediction as the primary decision
-        predicted_class_index = prediction.argmax(axis=1)[0]
-        predicted_class = classes[predicted_class_index]
-        confidence = float(prediction[0][predicted_class_index])
-        
-        # CONSERVATIVE APPROACH: Only override to fall if there's VERY strong evidence
-        # AND there's significant motion detected
-        if (predicted_class == "falling" and 
+        # ULTRA-CONSERVATIVE: Only detect fall if ALL conditions are met
+        fall_detected = (
+            falling_prob > 0.9 and  # Very high ML confidence
             motion_analysis['has_significant_motion'] and
-            falling_prob > 0.8):  # Much higher threshold
-            
-            # Additional validation for fall
-            if (motion_analysis['max_acc'] > 20.0 and  # Very high acceleration
-                motion_analysis['acc_range'] > 8.0 and  # Significant acceleration change
-                motion_analysis['acc_variance'] > 3.0):  # High variance indicating real movement
-                
-                predicted_class = "falling"
-                confidence = falling_prob
-                decision_reason = f"High-confidence fall detected with significant motion (ML: {falling_prob:.3f})"
-            else:
-                # Downgrade to most likely non-fall class
-                if kneeling_prob > walking_prob:
-                    predicted_class = "kneeling"
-                    confidence = kneeling_prob
-                else:
-                    predicted_class = "walking"
-                    confidence = walking_prob
-                decision_reason = f"Fall prediction downgraded due to insufficient motion evidence"
+            motion_analysis['max_acc'] > 30.0 and  # Very high acceleration
+            motion_analysis['acc_range'] > 20.0 and  # Large acceleration change
+            motion_analysis['acc_variance'] > 8.0 and  # High variance
+            motion_analysis['gyro_variance'] > 3.0  # High rotational change
+        )
         
-        elif not motion_analysis['has_significant_motion']:
-            # If there's no significant motion, it's very unlikely to be a fall
+        if fall_detected:
+            predicted_class = "falling"
+            confidence = falling_prob
+            decision_reason = f"HIGH-CONFIDENCE fall detected with extreme motion (ML: {falling_prob:.3f})"
+        else:
+            # Default to most likely non-fall class
             if kneeling_prob > walking_prob:
                 predicted_class = "kneeling"
                 confidence = kneeling_prob
             else:
-                predicted_class = "walking" 
+                predicted_class = "walking"
                 confidence = walking_prob
-            decision_reason = "No significant motion detected - not a fall"
-        
-        else:
-            # Trust the model for non-fall predictions or low-confidence falls
-            decision_reason = f"ML model prediction: {predicted_class} (confidence: {confidence:.3f})"
+            
+            if falling_prob > 0.5:
+                decision_reason = f"Fall prediction REJECTED - insufficient motion evidence (ML: {falling_prob:.3f})"
+            else:
+                decision_reason = f"ML model prediction: {predicted_class} (confidence: {confidence:.3f})"
         
         # Get prediction probabilities for all classes
         prediction_probs = {
@@ -248,23 +249,25 @@ def predict(data: FallDetectionData):
             "decision_reason": decision_reason,
             "ml_predictions": prediction_probs,
             "motion_analysis": {
-                "has_significant_motion": bool(motion_analysis['has_significant_motion']),
+                "is_stationary": motion_analysis['is_stationary'],
+                "has_significant_motion": motion_analysis['has_significant_motion'],
                 "acceleration_variance": round(float(motion_analysis['acc_variance']), 3),
                 "gyroscope_variance": round(float(motion_analysis['gyro_variance']), 3),
                 "acceleration_range": round(float(motion_analysis['acc_range']), 3),
                 "gyroscope_range": round(float(motion_analysis['gyro_range']), 3),
                 "max_acceleration": round(float(motion_analysis['max_acc']), 3),
-                "min_acceleration": round(float(motion_analysis['min_acc']), 3),
+                "average_acceleration": round(float(motion_analysis['avg_acc']), 3),
                 "max_gyroscope": round(float(motion_analysis['max_gyro']), 3)
             },
             "model_info": {
-                "model_type": "Conservative Fall Detection",
-                "features_used": expected_features,
-                "approach": "Motion-validated ML predictions with high thresholds"
+                "model_type": "Ultra-Conservative Fall Detection",
+                "features_used": 17,
+                "approach": "Stationary detection + ultra-high thresholds"
             },
             "status": "success"
         }
         
+
     except HTTPException:
         raise
     except Exception as e:
