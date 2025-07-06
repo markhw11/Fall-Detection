@@ -195,9 +195,12 @@ def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> tuple[np.nda
         logger.error(f"Error in preprocessing: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Preprocessing error: {str(e)}")
 
-# Updated prediction logic with conservative approach
-@app.post("/predict/", summary="Predict fall event from raw sensor data (conservative approach)",
-          response_description="Detailed fall detection result with motion analysis.")
+# Corrected: Enclosed decorator arguments in parentheses
+@app.post(
+    "/predict/",
+    summary="Predict fall event from raw sensor data (conservative approach)",
+    response_description="Detailed fall detection result with motion analysis."
+)
 def predict(data: FallDetectionData):
     """
     Predicts fall events from 100 raw sensor readings.
@@ -352,8 +355,12 @@ def predict(data: FallDetectionData):
 
 ---
 
-@app.post("/tune_thresholds/", summary="Tune fall detection thresholds for optimization",
-          response_description="Evaluates sensor data against custom thresholds for fine-tuning fall detection logic.")
+# Corrected: Enclosed decorator arguments in parentheses
+@app.post(
+    "/tune_thresholds/",
+    summary="Tune fall detection thresholds for optimization",
+    response_description="Evaluates sensor data against custom thresholds for fine-tuning fall detection logic."
+)
 def tune_thresholds(data: FallDetectionData,
                     # Motion Analysis Thresholds
                     stationary_acc_std: float = Field(0.25, description="Max Std Dev for Accel to be considered stationary"),
@@ -519,8 +526,12 @@ def tune_thresholds(data: FallDetectionData,
 
 ---
 
-@app.post("/predict_raw/", summary="Predict fall event from preprocessed sensor data",
-          response_description="Fall detection result for already processed features (17 features per timestep).")
+# Corrected: Enclosed decorator arguments in parentheses
+@app.post(
+    "/predict_raw/",
+    summary="Predict fall event from preprocessed sensor data",
+    response_description="Fall detection result for already processed features (17 features per timestep)."
+)
 def predict_raw(data: FallDetectionRawData):
     """
     Alternative endpoint for already preprocessed data.
@@ -612,7 +623,7 @@ def read_root():
         "key_features": [
             "✓ Highly conservative approach tailored to minimize false positives.",
             "✓ Robust motion level analysis (`detect_motion_level`) for initial screening and validation.",
-            "✓ Multiple, strict pathways for fall detection, combining ML confidence with physical thresholds.",
+            "✓ Multiple, strict pathways for fall detection, combining ML confidence with robust physical motion indicators (e.g., high impact, free fall signs, significant rotation).",
             "✓ Automatic classification adjustment/downgrading for low-confidence ML fall predictions.",
             "✓ 17 carefully engineered sensor features for comprehensive activity representation.",
             "✓ Dedicated `/tune_thresholds` endpoint for dynamic fine-tuning of detection parameters.",
@@ -715,7 +726,7 @@ if __name__ == "__main__":
     print("  - Motion Analysis: Differentiates true movement from stationary periods.")
     print("  - Multiple Detection Pathways: Requires strong evidence (ML confidence + physical indicators) for a fall.")
     print("  - Dynamic Threshold Tuning: '/tune_thresholds' endpoint for calibrating detection parameters.")
+    print("  - Clear decision reasoning and detailed motion analysis included in responses.")
+    print("  - Optimized for real-world reliability and reduced alert fatigue.")
     print("\n--------------------")
-    # You might want to adjust the default model path for uvicorn.run if it's different from the loaded one.
-    # For Windows paths, ensure raw string or double backslashes: r"D:\Uni\Graduationproject\FallDet\anti_overfitting_fall_detection_model.h5"
     uvicorn.run(app, host="0.0.0.0", port=8000)
