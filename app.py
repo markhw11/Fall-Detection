@@ -45,7 +45,6 @@ def calculate_change_features(window_data):
     features = []
     
     # 1. Maximum acceleration magnitude
-    # FIX: Corrected to square the values (**) instead of multiplying by 2 (*)
     acc_mag = np.sqrt(window_data['ax']**2 + window_data['ay']**2 + window_data['az']**2)
     max_acc = acc_mag.max()
     features.append(max_acc)
@@ -113,7 +112,6 @@ def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tup
         ])
     
     df = pd.DataFrame(data, columns=['ax', 'ay', 'az', 'wx', 'wy', 'wz'])
-    # FIX: Corrected to square the values (**) instead of multiplying by 2 (*)
     df['acc_mag'] = np.sqrt(df['ax']**2 + df['ay']**2 + df['az']**2)
     
     # Calculate change detection features
@@ -197,7 +195,7 @@ def predict(data: FallDetectionData):
         
         # Get prediction probabilities for all classes
         prediction_probs = {
-            classes[i]: float(prediction[0][i])  
+            classes[i]: float(prediction[0][i]) 
             for i in range(len(classes))
         }
         
@@ -283,7 +281,7 @@ def predict_raw(data: FallDetectionRawData):
             confidence = float(prediction[0][predicted_class_index])
         
         prediction_probs = {
-            classes[i]: float(prediction[0][i])  
+            classes[i]: float(prediction[0][i]) 
             for i in range(len(classes))
         }
         
@@ -353,13 +351,13 @@ def model_info():
                 "original_features": ["ax", "ay", "az", "wx", "wy", "wz", "acc_mag"],
                 "change_detection_features": [
                     "max_acceleration",
-                    "max_change_rate",  
+                    "max_change_rate", 
                     "acceleration_std",
                     "max_gyro_velocity",
                     "min_acceleration",
                     "impact_score",
                     "ax_change",
-                    "ay_change",  
+                    "ay_change", 
                     "az_change",
                     "fall_pattern_score"
                 ],
@@ -383,7 +381,7 @@ def model_info():
     except Exception as e:
         return {"error": str(e)}
 
-if __name__ == "__main__": # Corrected __name__
+if __name__ == "__main__":
     print("Starting Enhanced Anti-Overfitting Fall Detection API...")
     print("Model features:")
     print("- ✓ Realistic 66.6% accuracy (not overfitted)")
