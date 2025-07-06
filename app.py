@@ -219,7 +219,6 @@ def predict(data: FallDetectionData):
         # Analyze motion level first
         motion_analysis = detect_motion_level(df)
 
-        # --- Conservative Override Logic ---
         # 1. If device is clearly stationary, immediately return non-fall
         if motion_analysis['is_stationary']:
             return {
@@ -243,8 +242,6 @@ def predict(data: FallDetectionData):
         falling_prob = float(prediction[0][classes.index('falling')]) # Use index to be robust to class order
         kneeling_prob = float(prediction[0][classes.index('kneeling')])
         walking_prob = float(prediction[0][classes.index('walking')])
-
-        # --- BALANCED APPROACH: Multiple pathways to detect falls (tuned for fewer FPs) ---
 
         # Pathway 1: High-confidence ML prediction with confirmed significant motion
         high_confidence_fall = (
