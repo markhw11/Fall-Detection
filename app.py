@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Query # Import Query
 from pydantic import BaseModel, validator, Field
 import numpy as np
 import tensorflow as tf
@@ -369,29 +369,29 @@ def predict(data: FallDetectionData):
 )
 def tune_thresholds(data: FallDetectionData,
                     # Motion Analysis Thresholds
-                    stationary_acc_std: float = Field(0.25, description="Max Std Dev for Accel to be considered stationary"),
-                    stationary_gyro_std: float = Field(0.04, description="Max Std Dev for Gyro to be considered stationary"),
-                    stationary_acc_iqr: float = Field(1.0, description="Max IQR for Accel to be considered stationary"),
-                    stationary_gyro_iqr: float = Field(0.2, description="Max IQR for Gyro to be considered stationary"),
-                    stationary_max_acc: float = Field(11.0, description="Max peak Accel for stationary"),
-                    stationary_min_acc_gt: float = Field(8.0, description="Min lowest Accel for stationary (should be near gravity)"),
-                    significant_motion_acc_std: float = Field(2.5, description="Min Std Dev for Accel to indicate significant motion"),
-                    significant_motion_gyro_std: float = Field(1.0, description="Min Std Dev for Gyro to indicate significant motion"),
-                    significant_motion_acc_iqr: float = Field(5.0, description="Min IQR for Accel to indicate significant motion"),
-                    significant_motion_gyro_iqr: float = Field(2.0, description="Min IQR for Gyro to indicate significant motion"),
-                    significant_motion_max_acc: float = Field(20.0, description="Min max Accel for significant motion"),
-                    significant_motion_min_acc: float = Field(5.0, description="Max min Accel for significant motion (for free-fall consideration)"),
+                    stationary_acc_std: float = Query(0.25, description="Max Std Dev for Accel to be considered stationary"),
+                    stationary_gyro_std: float = Query(0.04, description="Max Std Dev for Gyro to be considered stationary"),
+                    stationary_acc_iqr: float = Query(1.0, description="Max IQR for Accel to be considered stationary"),
+                    stationary_gyro_iqr: float = Query(0.2, description="Max IQR for Gyro to be considered stationary"),
+                    stationary_max_acc: float = Query(11.0, description="Max peak Accel for stationary"),
+                    stationary_min_acc_gt: float = Query(8.0, description="Min lowest Accel for stationary (should be near gravity)"),
+                    significant_motion_acc_std: float = Query(2.5, description="Min Std Dev for Accel to indicate significant motion"),
+                    significant_motion_gyro_std: float = Query(1.0, description="Min Std Dev for Gyro to indicate significant motion"),
+                    significant_motion_acc_iqr: float = Query(5.0, description="Min IQR for Accel to indicate significant motion"),
+                    significant_motion_gyro_iqr: float = Query(2.0, description="Min IQR for Gyro to indicate significant motion"),
+                    significant_motion_max_acc: float = Query(20.0, description="Min max Accel for significant motion"),
+                    significant_motion_min_acc: float = Query(5.0, description="Max min Accel for significant motion (for free-fall consideration)"),
                     # ML Pathway Thresholds
-                    high_confidence_ml_prob: float = Field(0.85, description="Min ML 'falling' probability for high-confidence pathway"),
-                    high_confidence_ml_acc_peak: float = Field(18.0, description="Min peak Accel for high-confidence pathway"),
-                    medium_confidence_ml_prob: float = Field(0.65, description="Min ML 'falling' probability for medium-confidence pathway"),
-                    medium_confidence_ml_acc_peak: float = Field(25.0, description="Min peak Accel for medium-confidence pathway"),
-                    medium_confidence_ml_min_acc: float = Field(6.0, description="Max min Accel for medium-confidence pathway (free-fall)"),
-                    medium_confidence_ml_gyro_std: float = Field(1.5, description="Min Gyro Std Dev for medium-confidence pathway"),
-                    extreme_motion_ml_prob: float = Field(0.30, description="Min ML 'falling' probability for extreme motion pathway"),
-                    extreme_motion_max_acc: float = Field(35.0, description="Min extremely high peak Accel for extreme motion pathway"),
-                    extreme_motion_min_acc: float = Field(3.0, description="Max extremely low min Accel for extreme motion pathway"),
-                    extreme_motion_acc_iqr: float = Field(10.0, description="Min Accel IQR for extreme motion pathway")
+                    high_confidence_ml_prob: float = Query(0.85, description="Min ML 'falling' probability for high-confidence pathway"),
+                    high_confidence_ml_acc_peak: float = Query(18.0, description="Min peak Accel for high-confidence pathway"),
+                    medium_confidence_ml_prob: float = Query(0.65, description="Min ML 'falling' probability for medium-confidence pathway"),
+                    medium_confidence_ml_acc_peak: float = Query(25.0, description="Min peak Accel for medium-confidence pathway"),
+                    medium_confidence_ml_min_acc: float = Query(6.0, description="Max min Accel for medium-confidence pathway (free-fall)"),
+                    medium_confidence_ml_gyro_std: float = Query(1.5, description="Min Gyro Std Dev for medium-confidence pathway"),
+                    extreme_motion_ml_prob: float = Query(0.30, description="Min ML 'falling' probability for extreme motion pathway"),
+                    extreme_motion_max_acc: float = Query(35.0, description="Min extremely high peak Accel for extreme motion pathway"),
+                    extreme_motion_min_acc: float = Query(3.0, description="Max extremely low min Accel for extreme motion pathway"),
+                    extreme_motion_acc_iqr: float = Query(10.0, description="Min Accel IQR for extreme motion pathway")
                     ):
     """
     This endpoint allows you to **dynamically test different threshold values** for the motion analysis
