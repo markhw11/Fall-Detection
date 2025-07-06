@@ -11,7 +11,7 @@ app = FastAPI(title="Enhanced Anti-Overfitting Fall Detection API", description=
 
 # Load the enhanced anti-overfitting trained model
 try:
-    model = tf.keras.models.load_model(r"final.h5")
+    model = tf.keras.models.load_model(r"Final.h5")
     print("Enhanced anti-overfitting model loaded successfully!")
 except Exception as e:
     print(f"Error loading model: {e}")
