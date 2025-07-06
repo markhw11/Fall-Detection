@@ -6,17 +6,11 @@ import pandas as pd
 import uvicorn
 from typing import List, Optional
 import logging
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
-app = FastAPI(
-    title="Robust Fall Detection API - Reduced False Positives",
-    description="API for fall detection with enhanced motion validation and dynamic threshold tuning to minimize false positives.",
-    version="2.3.0" # Incremented version
-)
 
 # Global model variable and pre-defined feature columns
 model = None
@@ -31,7 +25,7 @@ FEATURE_COLUMNS = [
 ]
 EXPECTED_FEATURE_COUNT = len(FEATURE_COLUMNS) # Should be 17
 
-# Load the model
+# Load the model function
 def load_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
     """Loads the TensorFlow/Keras model from the specified path."""
     global model
@@ -46,10 +40,26 @@ def load_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model
         model = None
         return False
 
-# Load model on startup
-# Using a relative path as a default for better portability, or ensure the absolute path is correct.
-# You had an absolute path in reload_model, let's keep the default here flexible.
-load_model()
+# Define a lifespan context manager for FastAPI to handle startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Context manager for application lifespan events.
+    Loads the ML model when the application starts up.
+    """
+    logger.info("Application startup: Loading ML model...")
+    load_model()
+    yield
+    logger.info("Application shutdown: Cleaning up resources (if any)...")
+    # Optional: Add cleanup logic here if needed, e.g., tf.keras.backend.clear_session()
+
+# Initialize FastAPI app with the lifespan manager
+app = FastAPI(
+    title="Robust Fall Detection API - Reduced False Positives",
+    description="API for fall detection with enhanced motion validation and dynamic threshold tuning to minimize false positives.",
+    version="2.2.0", # Incremented version
+    lifespan=lifespan # Assign the lifespan context manager
+)
 
 # Pydantic models for request validation
 class SensorReading(BaseModel):
@@ -195,7 +205,6 @@ def preprocess_sensor_data(sensor_readings: List[SensorReading]) -> tuple[np.nda
         logger.error(f"Error in preprocessing: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Preprocessing error: {str(e)}")
 
-# Corrected: Enclosed decorator arguments in parentheses
 @app.post(
     "/predict/",
     summary="Predict fall event from raw sensor data (conservative approach)",
@@ -353,12 +362,11 @@ def predict(data: FallDetectionData):
         logger.error(f"Prediction error: {e}", exc_info=True) # Log exception info for debugging
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction failed: {str(e)}")
 
-# Corrected: Enclosed decorator arguments in parentheses
 @app.post(
     "/tune_thresholds/",
     summary="Tune fall detection thresholds for optimization",
     response_description="Evaluates sensor data against custom thresholds for fine-tuning fall detection logic."
-) # Added closing parenthesis here
+)
 def tune_thresholds(data: FallDetectionData,
                     # Motion Analysis Thresholds
                     stationary_acc_std: float = Field(0.25, description="Max Std Dev for Accel to be considered stationary"),
@@ -522,12 +530,11 @@ def tune_thresholds(data: FallDetectionData,
         logger.error(f"Tuning failed: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Tuning failed: {str(e)}")
 
-# Corrected: Enclosed decorator arguments in parentheses
 @app.post(
     "/predict_raw/",
     summary="Predict fall event from preprocessed sensor data",
     response_description="Fall detection result for already processed features (17 features per timestep)."
-) # Added closing parenthesis here
+)
 def predict_raw(data: FallDetectionRawData):
     """
     Alternative endpoint for already preprocessed data.
@@ -602,7 +609,7 @@ def predict_raw(data: FallDetectionRawData):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Raw prediction failed: {str(e)}")
 
 @app.get("/", summary="Welcome message and API overview",
-          response_description="General information about the Fall Detection API.") # Added closing parenthesis here
+          response_description="General information about the Fall Detection API.")
 def read_root():
     """Provides a welcome message and an overview of the API's capabilities and endpoints."""
     return {
@@ -636,7 +643,7 @@ def read_root():
     }
 
 @app.get("/health", summary="Health check endpoint",
-          response_description="Status of the API and model loading.") # Added closing parenthesis here
+          response_description="Status of the API and model loading.")
 def health_check():
     """Checks the health of the API and whether the machine learning model is loaded."""
     return {
@@ -647,7 +654,7 @@ def health_check():
     }
 
 @app.post("/reload_model", summary="Reload the ML model",
-           response_description="Confirms successful model reload or provides error details.") # Added closing parenthesis here
+           response_description="Confirms successful model reload or provides error details.")
 def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
     """
     Reloads the machine learning model from the specified H5 file path.
@@ -663,7 +670,7 @@ def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_mod
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reload model. Check logs for details.")
 
 @app.get("/model_info", summary="Get detailed model information",
-          response_description="Provides details about the loaded ML model, its features, and detection strategy.") # Added closing parenthesis here
+          response_description="Provides details about the loaded ML model, its features, and detection strategy.")
 def model_info():
     """Provides detailed information about the loaded machine learning model, including its input/output shapes,
     the features it expects, and the core principles of its conservative detection approach.
