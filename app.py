@@ -79,7 +79,7 @@ class FallDetectionData(BaseModel):
 
 class FallDetectionRawData(BaseModel):
     features: List[List[float]] = Field(..., min_items=100, max_items=100,
-                                        description=f"List of 100 time steps, each containing {EXPECTED_FEATURE_COUNT} preprocessed features.")
+                                         description=f"List of 100 time steps, each containing {EXPECTED_FEATURE_COUNT} preprocessed features.")
 
     @validator('features')
     def validate_features_shape(cls, v):
@@ -353,8 +353,6 @@ def predict(data: FallDetectionData):
         logger.error(f"Prediction error: {e}", exc_info=True) # Log exception info for debugging
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction failed: {str(e)}")
 
----
-
 # Corrected: Enclosed decorator arguments in parentheses
 @app.post(
     "/tune_thresholds/",
@@ -524,8 +522,6 @@ def tune_thresholds(data: FallDetectionData,
         logger.error(f"Tuning failed: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Tuning failed: {str(e)}")
 
----
-
 # Corrected: Enclosed decorator arguments in parentheses
 @app.post(
     "/predict_raw/",
@@ -605,10 +601,8 @@ def predict_raw(data: FallDetectionRawData):
         logger.error(f"Raw prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Raw prediction failed: {str(e)}")
 
----
-
 @app.get("/", summary="Welcome message and API overview",
-         response_description="General information about the Fall Detection API.")
+          response_description="General information about the Fall Detection API.")
 def read_root():
     """Provides a welcome message and an overview of the API's capabilities and endpoints."""
     return {
@@ -641,10 +635,8 @@ def read_root():
         }
     }
 
----
-
 @app.get("/health", summary="Health check endpoint",
-         response_description="Status of the API and model loading.")
+          response_description="Status of the API and model loading.")
 def health_check():
     """Checks the health of the API and whether the machine learning model is loaded."""
     return {
@@ -654,10 +646,8 @@ def health_check():
         "expected_performance_goal": "Significantly reduced false positives; optimized for high precision."
     }
 
----
-
 @app.post("/reload_model", summary="Reload the ML model",
-          response_description="Confirms successful model reload or provides error details.")
+           response_description="Confirms successful model reload or provides error details.")
 def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
     """
     Reloads the machine learning model from the specified H5 file path.
@@ -672,10 +662,8 @@ def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_mod
     else:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reload model. Check logs for details.")
 
----
-
 @app.get("/model_info", summary="Get detailed model information",
-         response_description="Provides details about the loaded ML model, its features, and detection strategy.")
+          response_description="Provides details about the loaded ML model, its features, and detection strategy.")
 def model_info():
     """Provides detailed information about the loaded machine learning model, including its input/output shapes,
     the features it expects, and the core principles of its conservative detection approach.
