@@ -219,6 +219,7 @@ def predict(data: FallDetectionData):
         # Analyze motion level first
         motion_analysis = detect_motion_level(df)
 
+        # Conservative Override Logic
         # 1. If device is clearly stationary, immediately return non-fall
         if motion_analysis['is_stationary']:
             return {
@@ -242,6 +243,8 @@ def predict(data: FallDetectionData):
         falling_prob = float(prediction[0][classes.index('falling')]) # Use index to be robust to class order
         kneeling_prob = float(prediction[0][classes.index('kneeling')])
         walking_prob = float(prediction[0][classes.index('walking')])
+
+        # BALANCED APPROACH: Multiple pathways to detect falls (tuned for fewer FPs)
 
         # Pathway 1: High-confidence ML prediction with confirmed significant motion
         high_confidence_fall = (
@@ -355,7 +358,7 @@ def predict(data: FallDetectionData):
     "/tune_thresholds/",
     summary="Tune fall detection thresholds for optimization",
     response_description="Evaluates sensor data against custom thresholds for fine-tuning fall detection logic."
-)
+) # Added closing parenthesis here
 def tune_thresholds(data: FallDetectionData,
                     # Motion Analysis Thresholds
                     stationary_acc_std: float = Field(0.25, description="Max Std Dev for Accel to be considered stationary"),
@@ -524,7 +527,7 @@ def tune_thresholds(data: FallDetectionData,
     "/predict_raw/",
     summary="Predict fall event from preprocessed sensor data",
     response_description="Fall detection result for already processed features (17 features per timestep)."
-)
+) # Added closing parenthesis here
 def predict_raw(data: FallDetectionRawData):
     """
     Alternative endpoint for already preprocessed data.
@@ -599,7 +602,7 @@ def predict_raw(data: FallDetectionRawData):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Raw prediction failed: {str(e)}")
 
 @app.get("/", summary="Welcome message and API overview",
-          response_description="General information about the Fall Detection API.")
+          response_description="General information about the Fall Detection API.") # Added closing parenthesis here
 def read_root():
     """Provides a welcome message and an overview of the API's capabilities and endpoints."""
     return {
@@ -633,7 +636,7 @@ def read_root():
     }
 
 @app.get("/health", summary="Health check endpoint",
-          response_description="Status of the API and model loading.")
+          response_description="Status of the API and model loading.") # Added closing parenthesis here
 def health_check():
     """Checks the health of the API and whether the machine learning model is loaded."""
     return {
@@ -644,7 +647,7 @@ def health_check():
     }
 
 @app.post("/reload_model", summary="Reload the ML model",
-           response_description="Confirms successful model reload or provides error details.")
+           response_description="Confirms successful model reload or provides error details.") # Added closing parenthesis here
 def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
     """
     Reloads the machine learning model from the specified H5 file path.
@@ -660,7 +663,7 @@ def reload_model(model_path: str = "enhanced_anti_overfitting_fall_detection_mod
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reload model. Check logs for details.")
 
 @app.get("/model_info", summary="Get detailed model information",
-          response_description="Provides details about the loaded ML model, its features, and detection strategy.")
+          response_description="Provides details about the loaded ML model, its features, and detection strategy.") # Added closing parenthesis here
 def model_info():
     """Provides detailed information about the loaded machine learning model, including its input/output shapes,
     the features it expects, and the core principles of its conservative detection approach.
