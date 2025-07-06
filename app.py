@@ -26,7 +26,7 @@ FEATURE_COLUMNS = [
 EXPECTED_FEATURE_COUNT = len(FEATURE_COLUMNS) # Should be 17
 
 # Load the model function
-def load_model(model_path: str = "enhanced_anti_overfitting_fall_detection_model.h5"):
+def load_model(model_path: str = "anti_overfitting_fall_detection_model.h5"):
     """Loads the TensorFlow/Keras model from the specified path."""
     global model
     try:
