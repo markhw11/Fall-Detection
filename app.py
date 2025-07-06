@@ -45,7 +45,7 @@ def calculate_change_features(window_data):
     features = []
     
     # 1. Maximum acceleration magnitude
-    acc_mag = np.sqrt(window_data['ax']*2 + window_data['ay']2 + window_data['az']*2)
+    acc_mag = np.sqrt(window_data['ax']**2 + window_data['ay']**2 + window_data['az']**2)
     max_acc = acc_mag.max()
     features.append(max_acc)
     
