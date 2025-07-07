@@ -79,6 +79,10 @@ class FallDetectionRawData(BaseModel):
 classes = ['falling', 'kneeling', 'walking']
 
 def calculate_change_features(window_data: pd.DataFrame) -> np.ndarray:
+    """
+    Calculate drastic change indicators for a window of sensor data.
+    Must match the training function exactly!
+    """
     features_list = []
     
     acc_mag = np.sqrt(window_data['ax']**2 + window_data['ay']**2 + window_data['az']**2)
@@ -129,6 +133,9 @@ def calculate_change_features(window_data: pd.DataFrame) -> np.ndarray:
     return np.array(features_list).reshape(1, -1)
 
 def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tuple:
+    """
+    Preprocess sensor data with change detection features for the enhanced model.
+    """
     data_list = []
     for reading in sensor_readings:
         data_list.append([
@@ -151,6 +158,10 @@ def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tup
     return enhanced_features, change_features, df
 
 def is_still(window_df: pd.DataFrame) -> bool:
+    """
+    Checks if the sensor data in a window indicates stillness.
+    Based on low standard deviation of acceleration and low maximum gyroscope values.
+    """
     acc_mag = np.sqrt(window_df['ax']**2 + window_df['ay']**2 + window_df['az']**2)
     acc_std = acc_mag.std()
     max_gyro_window = max(window_df['wx'].abs().max(), 
@@ -263,13 +274,50 @@ def predict(data: FallDetectionData):
         final_confidence = min(confidence, 1.0)
         final_decision_reason = decision_reason
 
-        # Check for stillness BEFORE a potential fall (to address "not moving gives falling")
+        # ADJUSTMENT START: More sophisticated stillness override
+        # Problem: "Putting mobile on a flat surface" gives false alarms.
+        # This occurs as a *transition to stillness*.
+        # We need to refine the `is_still` override for predicted falls.
         if is_still(raw_df_window) and predicted_class == "falling":
-            if impact_score < THRESHOLD_IMPACT_AMBIGUOUS:
-                 final_predicted_class = "not_a_fall_stillness"
-                 final_confidence = 0.99
-                 final_decision_reason = "OVERRIDE: Detected fall while device was already still"
-        
+            # If the device is now still AND it was just predicted as 'falling',
+            # it's a potential false alarm if the 'fall' didn't have strong characteristics.
+
+            # Re-evaluate the "fall" characteristics that triggered this prediction.
+            # If it's a fall prediction that lacks strong impact AND high acceleration,
+            # it's likely a controlled placement or gentle drop, not a true fall.
+            # True falls often have high impacts OR extreme acceleration (even if short freefall).
+
+            # Check if the fall was NOT due to extreme impact/acceleration overrides
+            # (which would indicate a definite fall onto a still surface, e.g., fainting)
+            is_fall_from_strong_override = (
+                (fall_score > OVERRIDE_FALL_SCORE_HIGH and max_acc > OVERRIDE_MAX_ACC_EXTREME) or
+                (max_acc > OVERRIDE_MAX_ACC_EXTREME and min_acc < OVERRIDE_MIN_ACC_EXTREME)
+            )
+            
+            # Check if the fall was NOT accompanied by a significant impact score or high overall acceleration.
+            # This is key for distinguishing controlled placement from a fall.
+            is_fall_low_impact_or_acc = (
+                impact_score < THRESHOLD_IMPACT_AMBIGUOUS and # Not a strong impact
+                max_acc < OVERRIDE_MAX_ACC_EXTREME # Not extremely high acceleration (even if not strong override)
+            )
+
+            # Rule for overriding fall to "not_a_fall_stillness":
+            # If the current window is still, and a 'falling' prediction was made,
+            # AND that 'falling' prediction was *not* due to an extremely strong fall override,
+            # AND the underlying features (impact/max_acc) suggest a controlled placement,
+            # then override it.
+            if not is_fall_from_strong_override and is_fall_low_impact_or_acc:
+                final_predicted_class = "not_a_fall_controlled_placement" # More specific label
+                final_confidence = 0.99
+                final_decision_reason = "OVERRIDE: Fall detected during controlled placement onto flat surface."
+            # else:
+                # If it's still AND predicted as falling, AND had strong impact/accel,
+                # then it might be a genuine fall ending in stillness (e.g., fainting, or falling and remaining motionless).
+                # The temporal confirmation will then play its role.
+
+        # ADJUSTMENT END: Stillness override refined
+
+
         # Update history for this device
         if final_predicted_class == "falling":
             if current_state['last_pred'] == "falling":
