@@ -14,10 +14,10 @@ app = FastAPI(title="Enhanced Anti-Overfitting Fall Detection API", description=
 # Adjust these to fine-tune sensitivity and reduce false positives.
 
 # Rule-based feature calculation thresholds (from calculate_change_features in notebook)
-THRESHOLD_MAX_ACC_FALL_SCORE = 18.0  # Increased from 15.0
+THRESHOLD_MAX_ACC_FALL_SCORE = 20.0  # Increased from 15.0
 THRESHOLD_MIN_ACC_FALL_SCORE = 2.0   # Decreased from 3.0 (stricter free-fall)
-THRESHOLD_ACC_DIFF_FALL_SCORE = 10.0 # Increased from 8.0
-THRESHOLD_MAX_GYRO_FALL_SCORE = 4  # Increased from 3.0 (Now used more strictly)
+THRESHOLD_ACC_DIFF_FALL_SCORE = 12.0 # Increased from 8.0
+THRESHOLD_MAX_GYRO_FALL_SCORE = 5.0  # Increased from 3.0 (Now used more strictly)
 
 THRESHOLD_IMPACT_PRE_ACC = 5.0      # Unchanged, as this is a pre-impact state
 THRESHOLD_IMPACT_POST_ACC = 12.0    # Unchanged, as this is a post-impact state
@@ -29,7 +29,7 @@ OVERRIDE_MIN_ACC_EXTREME = 0.5     # Decreased from 1.0 (stricter free-fall)
 
 ML_CONF_FALL_HIGH = 0.7            # Unchanged (model rarely hits this anyway)
 ML_CONF_FALL_MEDIUM = 0.6          # <--- ADJUSTED: Increased from 0.5
-ML_CONF_FALL_LOW = 0.5            # <--- ADJUSTED: Increased from 0.3
+ML_CONF_FALL_LOW = 0.55             # <--- ADJUSTED: Increased from 0.3
 
 # ADJUSTED: Stricter sudden change for fall classification
 THRESHOLD_MAX_CHANGE_AMBIGUOUS = 15.0 # Increased from 10.0 (Higher threshold for generic sudden change)
