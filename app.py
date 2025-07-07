@@ -163,18 +163,18 @@ def preprocess_enhanced_sensor_data(sensor_readings: List[SensorReading]) -> tup
     
     # Calculate initial acc_mag for the window, used within calculate_change_features
     # This column must exist before calling calculate_change_features
-    if 'acc_mag' not in df.columns: #
-        df['acc_mag'] = np.sqrt(df['ax']**2 + df['ay']**2 + df['az']**2) #
+    if 'acc_mag' not in df.columns:
+        df['acc_mag'] = np.sqrt(df['ax']**2 + df['ay']**2 + df['az']**2)
     
     # Calculate change detection features based on the entire window
-    change_features = calculate_change_features(df) #
+    change_features = calculate_change_features(df)
     
     # Create enhanced features by concatenating original sensor data with 
     # the window-level change features (tiled to match each timestep)
     enhanced_features = np.concatenate([
         df[['ax', 'ay', 'az', 'wx', 'wy', 'wz', 'acc_mag']].values, # Include acc_mag as an original feature
         np.tile(change_features, (len(df), 1))
-    ], axis=1) #
+    ], axis=1)
     
     return enhanced_features, change_features, df # Return df for stillness check if needed
 
@@ -190,7 +190,8 @@ def is_still(window_df: pd.DataFrame) -> bool:
                           window_df['wy'].abs().max(), 
                           window_df['wz'].abs().max())
     
-    return acc_std < STILLNESS_ACC_STD_THRESHOLD and max_gyro_window < STILLNESS_GYRO_MAX_THRESHOLD
+    return bool(acc_std < STILLNESS_ACC_STD_THRESHOLD and max_gyro_window < STILLNESS_GYRO_MAX_THRESHOLD)
+
 
 @app.post("/predict/")
 def predict(data: FallDetectionData):
@@ -208,7 +209,7 @@ def predict(data: FallDetectionData):
         device_id = data.sensor_data[0].device_id # Get device_id from first reading
 
         # Preprocess with enhanced features
-        features, change_features_array, raw_df_window = preprocess_enhanced_sensor_data(data.sensor_data) #
+        features, change_features_array, raw_df_window = preprocess_enhanced_sensor_data(data.sensor_data)
         
         # Validate feature shape - enhanced model expects more features
         expected_features = 17  # 7 original + 10 change detection features
@@ -216,10 +217,10 @@ def predict(data: FallDetectionData):
             return {"error": f"Invalid feature shape after preprocessing. Expected (100, {expected_features}), got {features.shape}", "status": "failed"}
         
         # Reshape for prediction
-        features = np.expand_dims(features, axis=0) #
+        features = np.expand_dims(features, axis=0)
         
         # Get ML model prediction
-        prediction = model.predict(features) #
+        prediction = model.predict(features)
         
         # Extract probabilities for ML model's raw output
         falling_prob = float(prediction[0][0])
@@ -236,7 +237,7 @@ def predict(data: FallDetectionData):
         ax_change = float(change_features_array[0][6])
         ay_change = float(change_features_array[0][7])
         az_change = float(change_features_array[0][8])
-        fall_score = float(change_features_array[0][-1]) #
+        fall_score = float(change_features_array[0][-1])
         
         # --- Refined Hybrid Decision Logic (Adjusted Thresholds) ---
         # This is where we prioritize reducing false alarms.
@@ -247,44 +248,42 @@ def predict(data: FallDetectionData):
 
         # 1. Strongest physical evidence for a fall (highest thresholds)
         # Combine fall_score and max_acc for very clear, high-impact falls.
-        if fall_score > OVERRIDE_FALL_SCORE_HIGH and max_acc > OVERRIDE_MAX_ACC_EXTREME: #
+        if fall_score > OVERRIDE_FALL_SCORE_HIGH and max_acc > OVERRIDE_MAX_ACC_EXTREME:
             predicted_class = "falling"
             confidence = min(0.98, falling_prob + (fall_score * 0.5)) # High confidence for clear physical fall
             decision_reason = "OVERRIDE: Extreme fall pattern & high impact detected"
         # 2. Free-fall + massive impact (also very strong evidence)
-        elif max_acc > OVERRIDE_MAX_ACC_EXTREME and min_acc < OVERRIDE_MIN_ACC_EXTREME: #
+        elif max_acc > OVERRIDE_MAX_ACC_EXTREME and min_acc < OVERRIDE_MIN_ACC_EXTREME:
             predicted_class = "falling"
             confidence = min(0.95, falling_prob + 0.4) # High confidence for clear physical fall
             decision_reason = "OVERRIDE: Massive impact & free fall detected"
         # 3. ML is very confident about fall (but model rarely hits > 0.7)
-        elif falling_prob > ML_CONF_FALL_HIGH: #
+        elif falling_prob > ML_CONF_FALL_HIGH:
             predicted_class = "falling"
             confidence = falling_prob
             decision_reason = f"ML very confident about fall ({falling_prob:.3f})"
         # 4. Moderate ML confidence combined with strong sudden change or free-fall
         # This is crucial for differentiating kneeling/walking. Increased ML_CONF_FALL_MEDIUM.
-        elif falling_prob > ML_CONF_FALL_MEDIUM and (max_change > THRESHOLD_MAX_CHANGE_AMBIGUOUS or min_acc < THRESHOLD_MIN_ACC_AMBIGUOUS): #
+        elif falling_prob > ML_CONF_FALL_MEDIUM and (max_change > THRESHOLD_MAX_CHANGE_AMBIGUOUS or min_acc < THRESHOLD_MIN_ACC_AMBIGUOUS):
             predicted_class = "falling"
             confidence = min(0.85, falling_prob + 0.3) # Moderate confidence for combined evidence
             decision_reason = f"ML ({falling_prob:.3f}) + strong change/free-fall"
         # 5. Moderate ML confidence combined with high impact
         # Increased ML_CONF_FALL_LOW and THRESHOLD_IMPACT_AMBIGUOUS.
-        elif falling_prob > ML_CONF_FALL_LOW and impact_score > THRESHOLD_IMPACT_AMBIGUOUS: #
+        elif falling_prob > ML_CONF_FALL_LOW and impact_score > THRESHOLD_IMPACT_AMBIGUOUS:
             predicted_class = "falling"
             confidence = min(0.80, falling_prob + 0.35) # Moderate confidence for combined evidence
             decision_reason = f"ML ({falling_prob:.3f}) + high impact"
         # 6. Default to ML model's top choice if no strong fall rules are met
         else:
-            predicted_class_index = prediction.argmax(axis=1)[0] #
-            ml_top_choice = classes[predicted_class_index] #
-            ml_confidence = float(prediction[0][predicted_class_index]) #
+            predicted_class_index = prediction.argmax(axis=1)[0]
+            ml_top_choice = classes[predicted_class_index]
+            ml_confidence = float(prediction[0][predicted_class_index])
             
             # If ML's top choice is falling, but with low confidence, consider it not a fall
             # unless one of the stronger rules above was met.
+            # This explicitly targets cases like "kneeling -> predicted falling, confidence 0.5"
             if ml_top_choice == "falling" and ml_confidence < ML_CONF_FALL_LOW:
-                # If falling_prob is low, even if it's highest, it's likely a false alarm.
-                # Re-classify to the next highest non-falling class or 'walking' as a default safe bet.
-                # This explicitly targets cases like "kneeling -> predicted falling, confidence 0.5"
                 if kneeling_prob > walking_prob:
                     predicted_class = "kneeling"
                     confidence = kneeling_prob
@@ -350,14 +349,15 @@ def predict(data: FallDetectionData):
         }
         
         # Calculate fall indicators
+        # *** FIX APPLIED HERE: Cast numpy.bool_ to Python bool ***
         fall_indicators = {
-            "high_impact": max_acc > THRESHOLD_MAX_ACC_FALL_SCORE,
-            "free_fall": min_acc < THRESHOLD_MIN_ACC_FALL_SCORE,
-            "sudden_change": max_change > THRESHOLD_ACC_DIFF_FALL_SCORE,
-            "high_rotation": max_gyro > THRESHOLD_MAX_GYRO_FALL_SCORE,
-            "strong_fall_pattern": fall_score > OVERRIDE_FALL_SCORE_HIGH, # Use the high override threshold for indicator
-            "extreme_acceleration_override": max_acc > OVERRIDE_MAX_ACC_EXTREME,
-            "impact_detected_rule": impact_score > THRESHOLD_IMPACT_AMBIGUOUS
+            "high_impact": bool(max_acc > THRESHOLD_MAX_ACC_FALL_SCORE),
+            "free_fall": bool(min_acc < THRESHOLD_MIN_ACC_FALL_SCORE),
+            "sudden_change": bool(max_change > THRESHOLD_ACC_DIFF_FALL_SCORE),
+            "high_rotation": bool(max_gyro > THRESHOLD_MAX_GYRO_FALL_SCORE),
+            "strong_fall_pattern": bool(fall_score > OVERRIDE_FALL_SCORE_HIGH),
+            "extreme_acceleration_override": bool(max_acc > OVERRIDE_MAX_ACC_EXTREME),
+            "impact_detected_rule": bool(impact_score > THRESHOLD_IMPACT_AMBIGUOUS)
         }
         
         return {
@@ -379,7 +379,7 @@ def predict(data: FallDetectionData):
                     "ay_max_change": round(ay_change, 3),
                     "az_max_change": round(az_change, 3)
                 },
-                 "is_current_window_still": is_still(raw_df_window) # Added stillness check for current window
+                 "is_current_window_still": bool(is_still(raw_df_window)) # *** FIX APPLIED HERE: Cast numpy.bool_ to Python bool ***
             },
             "fall_indicators": fall_indicators,
             "temporal_confirmation_state": current_state, # For debugging post-processing state
