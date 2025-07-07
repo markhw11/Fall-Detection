@@ -28,8 +28,8 @@ OVERRIDE_MAX_ACC_EXTREME = 40.0    # Increased from 30.0
 OVERRIDE_MIN_ACC_EXTREME = 0.5     # Decreased from 1.0 (stricter free-fall)
 
 ML_CONF_FALL_HIGH = 0.7            # Unchanged (model rarely hits this anyway)
-ML_CONF_FALL_MEDIUM = 0.5          # Increased from 0.08 (CRITICAL FOR FALSE ALARMS)
-ML_CONF_FALL_LOW = 0.3             # Increased from 0.05 (CRITICAL FOR FALSE ALARMS)
+ML_CONF_FALL_MEDIUM = 0.6          # <--- ADJUSTED: Increased from 0.5
+ML_CONF_FALL_LOW = 0.5             # <--- ADJUSTED: Increased from 0.3
 
 # ADJUSTED: Stricter sudden change for fall classification
 THRESHOLD_MAX_CHANGE_AMBIGUOUS = 15.0 # Increased from 10.0 (Higher threshold for generic sudden change)
@@ -274,10 +274,7 @@ def predict(data: FallDetectionData):
         final_confidence = min(confidence, 1.0)
         final_decision_reason = decision_reason
 
-        # ADJUSTMENT START: More sophisticated stillness override
-        # Problem: "Putting mobile on a flat surface" gives false alarms.
-        # This occurs as a *transition to stillness*.
-        # We need to refine the `is_still` override for predicted falls.
+        # Check for stillness BEFORE a potential fall (to address "not moving gives falling")
         if is_still(raw_df_window) and predicted_class == "falling":
             # If the device is now still AND it was just predicted as 'falling',
             # it's a potential false alarm if the 'fall' didn't have strong characteristics.
@@ -314,8 +311,6 @@ def predict(data: FallDetectionData):
                 # If it's still AND predicted as falling, AND had strong impact/accel,
                 # then it might be a genuine fall ending in stillness (e.g., fainting, or falling and remaining motionless).
                 # The temporal confirmation will then play its role.
-
-        # ADJUSTMENT END: Stillness override refined
 
 
         # Update history for this device
