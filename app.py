@@ -29,7 +29,7 @@ OVERRIDE_MIN_ACC_EXTREME = 0.5     # Decreased from 1.0 (stricter free-fall)
 
 ML_CONF_FALL_HIGH = 0.7            # Unchanged (model rarely hits this anyway)
 ML_CONF_FALL_MEDIUM = 0.6          # <--- ADJUSTED: Increased from 0.5
-ML_CONF_FALL_LOW = 0.5             # <--- ADJUSTED: Increased from 0.3
+ML_CONF_FALL_LOW = 0.55             # <--- ADJUSTED: Increased from 0.3
 
 # ADJUSTED: Stricter sudden change for fall classification
 THRESHOLD_MAX_CHANGE_AMBIGUOUS = 15.0 # Increased from 10.0 (Higher threshold for generic sudden change)
