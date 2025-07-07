@@ -29,7 +29,7 @@ OVERRIDE_MIN_ACC_EXTREME = 0.5     # Decreased from 1.0 (stricter free-fall)
 
 ML_CONF_FALL_HIGH = 0.7            # Unchanged (model rarely hits this anyway)
 ML_CONF_FALL_MEDIUM = 0.6          # Adjusted from 0.5 to 0.6
-ML_CONF_FALL_LOW = 0.55            # <--- LATEST ADJUSTMENT: Increased from 0.5
+ML_CONF_FALL_LOW = 0.52            # <--- LATEST ADJUSTMENT: Increased from 0.5 to 0.52
 
 THRESHOLD_MAX_CHANGE_AMBIGUOUS = 15.0 # Increased from 10.0 (Higher threshold for generic sudden change)
 THRESHOLD_MIN_ACC_AMBIGUOUS = 2.0    # Unchanged, but ML_CONF_FALL_MEDIUM now applies
@@ -42,7 +42,11 @@ THRESHOLD_MAX_CHANGE_ROTATION_COMBINED = 8.0 # Lower than above, but requires ro
 CONFIRMATION_WINDOWS = 3 # Number of consecutive 'falling' predictions to confirm a fall.
 STILLNESS_ACC_STD_THRESHOLD = 0.5 # Low std dev of acceleration for stillness
 STILLNESS_GYRO_MAX_THRESHOLD = 0.5 # Low max gyro for stillness
-STILLNESS_DURATION_WINDOWS = 2   # How many windows of stillness to consider
+# Note: STILLNESS_DURATION_WINDOWS is conceptual and would require a buffer on API side
+# or client side to track multiple windows of stillness. Not implemented directly here yet.
+
+# NEW: Confidence for direct stillness classification
+THRESHOLD_STILL_CONFIDENCE = 0.99
 
 # --- Global Variables ---
 fall_prediction_history = {} # Stores {'device_id': {'last_pred': 'str', 'count': int, 'last_timestamp': float}}
@@ -75,7 +79,8 @@ class FallDetectionRawData(BaseModel):
     features: List[List[float]]
     device_id: str = "default_device"
 
-classes = ['falling', 'kneeling', 'walking']
+# Add 'steady_not_moving' to the classes list
+classes = ['falling', 'kneeling', 'walking', 'steady_not_moving'] # NEW CLASS ADDED
 
 def calculate_change_features(window_data: pd.DataFrame) -> np.ndarray:
     """
@@ -190,8 +195,46 @@ def predict(data: FallDetectionData):
         if features.shape[1] != expected_features:
             return {"error": f"Invalid feature shape after preprocessing. Expected (100, {expected_features}), got {features.shape}", "status": "failed"}
         
-        features = np.expand_dims(features, axis=0)
-        
+        # --- NEW: High-priority check for stillness ---
+        # If the device is very clearly still, classify it directly as 'steady_not_moving'
+        # without further ML model inference or complex hybrid logic.
+        if is_still(raw_df_window):
+            return {
+                "device_id": device_id,
+                "predicted_class": "steady_not_moving",
+                "confidence": THRESHOLD_STILL_CONFIDENCE, # High confidence for stillness
+                "decision_reason": "OVERRIDE: Device is stable and not moving (high priority stillness detection)",
+                "ml_raw_predictions": {}, # No ML prediction performed for this case
+                "change_analysis_features": {
+                    "max_acceleration": round(float(change_features_array[0][0]), 3),
+                    "min_acceleration": round(float(change_features_array[0][4]), 3),
+                    "max_change_rate": round(float(change_features_array[0][1]), 3),
+                    "acceleration_std": round(float(change_features_array[0][2]), 3),
+                    "max_gyro_velocity": round(float(change_features_array[0][3]), 3),
+                    "impact_score": round(float(change_features_array[0][5]), 3),
+                    "fall_pattern_score": round(float(change_features_array[0][-1]), 3),
+                    "axis_changes": {
+                        "ax_max_change": round(float(change_features_array[0][6]), 3),
+                        "ay_max_change": round(float(change_features_array[0][7]), 3),
+                        "az_max_change": round(float(change_features_array[0][8]), 3)
+                    },
+                    "is_current_window_still": True
+                },
+                "fall_indicators": { # Still provide indicators based on the still state
+                    "high_impact": False, "free_fall": False, "sudden_change": False,
+                    "high_rotation": False, "strong_fall_pattern": False,
+                    "extreme_acceleration_override": False, "impact_detected_rule": False
+                },
+                "temporal_confirmation_state": {"last_pred": "steady_not_moving", "count": 1},
+                "model_info": {
+                    "model_type": "Anti-overfitting Enhanced GRU", "features_used": expected_features,
+                    "training_accuracy": "66.6% (realistic, not overfitted)"
+                },
+                "status": "success"
+            }
+
+        # If not still, proceed with ML model prediction
+        features = np.expand_dims(features, axis=0) # Only expand if we are proceeding
         prediction = model.predict(features)
         
         falling_prob = float(prediction[0][0])
@@ -251,6 +294,7 @@ def predict(data: FallDetectionData):
             ml_top_choice = classes[predicted_class_index]
             ml_confidence = float(prediction[0][predicted_class_index])
             
+            # If ML's top choice is falling, but with low confidence, reclassify to kneeling/walking
             if ml_top_choice == "falling" and ml_confidence < ML_CONF_FALL_LOW:
                 if kneeling_prob > walking_prob:
                     predicted_class = "kneeling"
@@ -273,45 +317,26 @@ def predict(data: FallDetectionData):
         final_confidence = min(confidence, 1.0)
         final_decision_reason = decision_reason
 
-        # Check for stillness BEFORE a potential fall (to address "not moving gives falling")
-        if is_still(raw_df_window) and predicted_class == "falling":
-            # If the device is now still AND it was just predicted as 'falling',
-            # it's a potential false alarm if the 'fall' didn't have strong characteristics.
-
-            # Re-evaluate the "fall" characteristics that triggered this prediction.
-            # If it's a fall prediction that lacks strong impact AND high acceleration,
-            # it's likely a controlled placement or gentle drop, not a true fall.
-            # True falls often have high impacts OR extreme acceleration (even if short freefall).
-
-            # Check if the fall was NOT due to extreme impact/acceleration overrides
-            # (which would indicate a definite fall onto a still surface, e.g., fainting)
+        # The 'not_a_fall_controlled_placement' override
+        # This will now only be reached if the initial high-priority 'is_still' check above
+        # did NOT classify it as 'steady_not_moving', meaning it's a *transition* to stillness,
+        # not a prolonged still state.
+        if is_still(raw_df_window) and predicted_class == "falling": # This 'predicted_class' is *after* hybrid logic
             is_fall_from_strong_override = (
                 bool(fall_score > OVERRIDE_FALL_SCORE_HIGH and max_acc > OVERRIDE_MAX_ACC_EXTREME) or
                 bool(max_acc > OVERRIDE_MAX_ACC_EXTREME and min_acc < OVERRIDE_MIN_ACC_EXTREME)
             )
             
-            # Check if the fall was NOT accompanied by a significant impact score or high overall acceleration.
-            # This is key for distinguishing controlled placement from a fall.
             is_fall_low_impact_or_acc = (
-                bool(impact_score < THRESHOLD_IMPACT_AMBIGUOUS) and # Not a strong impact
-                bool(max_acc < OVERRIDE_MAX_ACC_EXTREME) # Not extremely high acceleration (even if not strong override)
+                bool(impact_score < THRESHOLD_IMPACT_AMBIGUOUS) and
+                bool(max_acc < OVERRIDE_MAX_ACC_EXTREME)
             )
 
-            # Rule for overriding fall to "not_a_fall_stillness":
-            # If the current window is still, and a 'falling' prediction was made,
-            # AND that 'falling' prediction was *not* due to an extremely strong fall override,
-            # AND the underlying features (impact/max_acc) suggest a controlled placement,
-            # then override it.
             if not is_fall_from_strong_override and is_fall_low_impact_or_acc:
-                final_predicted_class = "not_a_fall_controlled_placement" # More specific label
+                final_predicted_class = "not_a_fall_controlled_placement"
                 final_confidence = 0.99
                 final_decision_reason = "OVERRIDE: Fall detected during controlled placement onto flat surface."
-            # else:
-                # If it's still AND predicted as falling, AND had strong impact/accel,
-                # then it might be a genuine fall ending in stillness (e.g., fainting, or falling and remaining motionless).
-                # The temporal confirmation will then play its role.
-
-
+            
         # Update history for this device
         if final_predicted_class == "falling":
             if current_state['last_pred'] == "falling":
@@ -455,7 +480,7 @@ def read_root():
             "✓ Temporal Confirmation to reduce False Alarms",
             "✓ Stillness Detection to filter false alarms"
         ],
-        "classes": classes,
+        "classes": classes, # This will now reflect the added 'steady_not_moving'
         "endpoints": {
             "/predict/": "Send 100 sensor readings with automatic feature enhancement, hybrid logic, and temporal confirmation",
             "/predict_raw/": "Send already preprocessed enhanced data (17 features per timestep) - simpler ML output only",
@@ -482,7 +507,7 @@ def model_info():
         return {
             "input_shape": str(model.input_shape),
             "output_shape": str(model.output_shape),
-            "classes": classes,
+            "classes": classes, # This will now reflect the added 'steady_not_moving'
             "features": {
                 "original_features": ["ax", "ay", "az", "wx", "wy", "wz", "acc_mag"],
                 "change_detection_features": [
@@ -532,6 +557,9 @@ def model_info():
                     "stillness_acc_std_threshold": f"< {STILLNESS_ACC_STD_THRESHOLD} std dev",
                     "stillness_gyro_max_threshold": f"< {STILLNESS_GYRO_MAX_THRESHOLD} max rad/s",
                     "stillness_duration_windows": f"{STILLNESS_DURATION_WINDOWS} windows"
+                },
+                "direct_stillness_classification": { # NEW SECTION FOR STILLNESS
+                    "threshold_still_confidence": f"{THRESHOLD_STILL_CONFIDENCE} (direct override if is_still is true)"
                 }
             }
         }
